@@ -3,92 +3,17 @@
 package integration
 
 import (
-	"context"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"gophkeeper/internal/ports/remote/openapi"
 )
 
 func TestServerContainerAPI(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-
-	repoRoot, err := repoRoot()
-	if err != nil {
-		t.Fatalf("failed to resolve repo root: %v", err)
-	}
-
-	req := testcontainers.ContainerRequest{
-		Image:        "golang:1.22",
-		ExposedPorts: []string{"8080/tcp"},
-		Env: map[string]string{
-			"GOPHKEEPER_ADDR": ":8080",
-		},
-		WorkingDir: "/workspace",
-		Cmd:        []string{"sh", "-c", "go run ./cmd/server"},
-		Mounts: testcontainers.Mounts(
-			testcontainers.BindMount(repoRoot, "/workspace"),
-		),
-		WaitingFor: wait.ForHTTP("/api/v1/auth/validate").
-			WithPort("8080/tcp").
-			WithStatusCodeMatcher(func(status int) bool { return status == http.StatusUnauthorized }),
-	}
-
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	if err != nil {
-		t.Fatalf("failed to start container: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = container.Terminate(context.Background())
-	})
-
-	host, err := container.Host(ctx)
-	if err != nil {
-		t.Fatalf("failed to resolve container host: %v", err)
-	}
-	port, err := container.MappedPort(ctx, "8080/tcp")
-	if err != nil {
-		t.Fatalf("failed to resolve container port: %v", err)
-	}
-
-	baseURL := fmt.Sprintf("http://%s:%s/api", host, port.Port())
-	client, err := openapi.NewClientWithResponses(baseURL)
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-
-	registerResp, err := client.RegisterWithResponse(ctx, openapi.RegisterRequest{Login: "alice", Password: "secret"})
-	if err != nil {
-		t.Fatalf("register request failed: %v", err)
-	}
-	if registerResp.StatusCode() != http.StatusOK {
-		t.Fatalf("unexpected register status: %d", registerResp.StatusCode())
-	}
-
-	loginResp, err := client.LoginWithResponse(ctx, openapi.LoginRequest{Login: "alice", Password: "secret"})
-	if err != nil {
-		t.Fatalf("login request failed: %v", err)
-	}
-	if loginResp.StatusCode() != http.StatusOK || loginResp.JSON200 == nil {
-		t.Fatalf("unexpected login status: %d", loginResp.StatusCode())
-	}
-	if loginResp.JSON200.Token == "" {
-		t.Fatalf("expected login token")
-	}
-
-	token := loginResp.JSON200.Token
-	userID := loginResp.JSON200.UserId
+	ctx, client := startServer(t)
+	token, userID := registerAndLogin(t, ctx, client, "alice", "secret")
 
 	validateResp, err := client.ValidateWithResponse(ctx, authEditor(token))
 	if err != nil {
@@ -98,24 +23,33 @@ func TestServerContainerAPI(t *testing.T) {
 		t.Fatalf("unexpected validate status: %d", validateResp.StatusCode())
 	}
 
-	payload := mustTextPayload(t, "secret-data")
-	upsertReq := openapi.RecordUpsert{Type: openapi.Text, Payload: payload, Meta: openapi.Metadata{}}
-	upsertResp, err := client.UpsertRecordWithResponse(ctx, upsertReq, authEditor(token))
-	if err != nil {
-		t.Fatalf("upsert request failed: %v", err)
-	}
-	if upsertResp.StatusCode() != http.StatusOK || upsertResp.JSON200 == nil {
-		t.Fatalf("unexpected upsert status: %d", upsertResp.StatusCode())
-	}
-	recordID := upsertResp.JSON200.Id
+	meta := sampleMetadata()
+	recordIDs := []string{}
 
-	getResp, err := client.GetRecordWithResponse(ctx, recordID, authEditor(token))
-	if err != nil {
-		t.Fatalf("get request failed: %v", err)
-	}
-	if getResp.StatusCode() != http.StatusOK {
-		t.Fatalf("unexpected get status: %d", getResp.StatusCode())
-	}
+	textPayload := mustTextPayload(t, "secret-data")
+	textRecord := openapi.RecordUpsert{Type: openapi.Text, Payload: textPayload, Meta: meta}
+	textResp := upsertRecord(t, ctx, client, token, textRecord)
+	recordIDs = append(recordIDs, textResp.Id)
+
+	credPayload := mustCredentialPayload(t, "login", "pass")
+	credRecord := openapi.RecordUpsert{Type: openapi.Credential, Payload: credPayload, Meta: meta}
+	credResp := upsertRecord(t, ctx, client, token, credRecord)
+	recordIDs = append(recordIDs, credResp.Id)
+
+	binaryPayload := mustBinaryPayload(t, []byte("binary"))
+	binaryRecord := openapi.RecordUpsert{Type: openapi.Binary, Payload: binaryPayload, Meta: meta}
+	binaryResp := upsertRecord(t, ctx, client, token, binaryRecord)
+	recordIDs = append(recordIDs, binaryResp.Id)
+
+	cardPayload := mustBankCardPayload(t, "User", "4111111111111111", "10/28", "123")
+	cardRecord := openapi.RecordUpsert{Type: openapi.BankCard, Payload: cardPayload, Meta: meta}
+	cardResp := upsertRecord(t, ctx, client, token, cardRecord)
+	recordIDs = append(recordIDs, cardResp.Id)
+
+	verifyRecord(t, ctx, client, token, textResp.Id, openapi.Text, meta)
+	verifyRecord(t, ctx, client, token, credResp.Id, openapi.Credential, meta)
+	verifyRecord(t, ctx, client, token, binaryResp.Id, openapi.Binary, meta)
+	verifyRecord(t, ctx, client, token, cardResp.Id, openapi.BankCard, meta)
 
 	listResp, err := client.ListRecordsWithResponse(ctx, &openapi.ListRecordsParams{}, authEditor(token))
 	if err != nil {
@@ -124,8 +58,10 @@ func TestServerContainerAPI(t *testing.T) {
 	if listResp.StatusCode() != http.StatusOK || listResp.JSON200 == nil {
 		t.Fatalf("unexpected list status: %d", listResp.StatusCode())
 	}
-	if !recordPresent(listResp.JSON200, recordID) {
-		t.Fatalf("record not found in list")
+	for _, id := range recordIDs {
+		if !recordPresent(listResp.JSON200, id) {
+			t.Fatalf("record not found in list: %s", id)
+		}
 	}
 
 	pullResp, err := client.PullSyncWithResponse(ctx, &openapi.PullSyncParams{}, authEditor(token))
@@ -140,7 +76,6 @@ func TestServerContainerAPI(t *testing.T) {
 	}
 
 	syncPayload := mustTextPayload(t, "sync-data")
-	meta := openapi.Metadata{}
 	change := openapi.RecordChange{
 		RecordId:   fmt.Sprintf("sync-%d", time.Now().UnixNano()),
 		OwnerId:    userID,
@@ -170,7 +105,7 @@ func TestServerContainerAPI(t *testing.T) {
 		t.Fatalf("unexpected get synced status: %d", getSyncedResp.StatusCode())
 	}
 
-	deleteResp, err := client.DeleteRecordWithResponse(ctx, recordID, authEditor(token))
+	deleteResp, err := client.DeleteRecordWithResponse(ctx, textResp.Id, authEditor(token))
 	if err != nil {
 		t.Fatalf("delete request failed: %v", err)
 	}
@@ -178,7 +113,7 @@ func TestServerContainerAPI(t *testing.T) {
 		t.Fatalf("unexpected delete status: %d", deleteResp.StatusCode())
 	}
 
-	getDeletedResp, err := client.GetRecordWithResponse(ctx, recordID, authEditor(token))
+	getDeletedResp, err := client.GetRecordWithResponse(ctx, textResp.Id, authEditor(token))
 	if err != nil {
 		t.Fatalf("get deleted record failed: %v", err)
 	}
@@ -187,37 +122,77 @@ func TestServerContainerAPI(t *testing.T) {
 	}
 }
 
-func authEditor(token string) openapi.RequestEditorFn {
-	return func(ctx context.Context, req *http.Request) error {
-		req.Header.Set("Authorization", "Bearer "+token)
-		return nil
-	}
-}
+func TestScenarioNewUserFlow(t *testing.T) {
+	ctx, client := startServer(t)
+	token, userID := registerAndLogin(t, ctx, client, "new-user", "secret")
 
-func mustTextPayload(t *testing.T, text string) openapi.Payload {
-	var payload openapi.Payload
-	if err := payload.FromTextPayload(openapi.TextPayload{Kind: openapi.Text, Text: text}); err != nil {
-		t.Fatalf("failed to build payload: %v", err)
-	}
-	return payload
-}
+	meta := sampleMetadata()
+	payload := mustTextPayload(t, "hello")
+	record := openapi.RecordUpsert{Type: openapi.Text, Payload: payload, Meta: meta}
+	upserted := upsertRecord(t, ctx, client, token, record)
 
-func recordPresent(records *[]openapi.Record, id string) bool {
-	if records == nil {
-		return false
-	}
-	for _, record := range *records {
-		if record.Id == id {
-			return true
-		}
-	}
-	return false
-}
-
-func repoRoot() (string, error) {
-	cwd, err := os.Getwd()
+	pullResp, err := client.PullSyncWithResponse(ctx, &openapi.PullSyncParams{}, authEditor(token))
 	if err != nil {
-		return "", err
+		t.Fatalf("pull request failed: %v", err)
 	}
-	return filepath.Dir(filepath.Dir(cwd)), nil
+	if pullResp.StatusCode() != http.StatusOK || pullResp.JSON200 == nil {
+		t.Fatalf("unexpected pull status: %d", pullResp.StatusCode())
+	}
+
+	change, ok := findChange(pullResp.JSON200.Changes, upserted.Id)
+	if !ok {
+		t.Fatalf("expected change for record")
+	}
+	if change.Change != openapi.Upsert || change.Type != openapi.Text || change.OwnerId != userID {
+		t.Fatalf("unexpected change data")
+	}
+	if change.Meta == nil {
+		t.Fatalf("expected change metadata")
+	}
+	assertMetadata(t, *change.Meta, meta)
+}
+
+func TestScenarioExistingUserFlow(t *testing.T) {
+	ctx, client := startServer(t)
+	token, userID := registerAndLogin(t, ctx, client, "existing-user", "secret")
+
+	meta := sampleMetadata()
+	payload := mustTextPayload(t, "stored-data")
+	record := openapi.RecordUpsert{Type: openapi.Text, Payload: payload, Meta: meta}
+	upserted := upsertRecord(t, ctx, client, token, record)
+
+	loginResp, err := client.LoginWithResponse(ctx, openapi.LoginRequest{Login: "existing-user", Password: "secret"})
+	if err != nil {
+		t.Fatalf("login request failed: %v", err)
+	}
+	if loginResp.StatusCode() != http.StatusOK || loginResp.JSON200 == nil {
+		t.Fatalf("unexpected login status: %d", loginResp.StatusCode())
+	}
+	if loginResp.JSON200.UserId != userID {
+		t.Fatalf("unexpected user id")
+	}
+	token = loginResp.JSON200.Token
+
+	pullResp, err := client.PullSyncWithResponse(ctx, &openapi.PullSyncParams{}, authEditor(token))
+	if err != nil {
+		t.Fatalf("pull request failed: %v", err)
+	}
+	if pullResp.StatusCode() != http.StatusOK || pullResp.JSON200 == nil {
+		t.Fatalf("unexpected pull status: %d", pullResp.StatusCode())
+	}
+	if _, ok := findChange(pullResp.JSON200.Changes, upserted.Id); !ok {
+		t.Fatalf("expected change for record")
+	}
+
+	getResp, err := client.GetRecordWithResponse(ctx, upserted.Id, authEditor(token))
+	if err != nil {
+		t.Fatalf("get request failed: %v", err)
+	}
+	if getResp.StatusCode() != http.StatusOK || getResp.JSON200 == nil {
+		t.Fatalf("unexpected get status: %d", getResp.StatusCode())
+	}
+	assertMetadata(t, getResp.JSON200.Meta, meta)
+	if getResp.JSON200.Id != upserted.Id {
+		t.Fatalf("unexpected record id")
+	}
 }

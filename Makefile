@@ -9,3 +9,8 @@ openapi-gen:
 .PHONY: test-integration
 test-integration:
 	go test -tags=integration -run ^TestServerContainerAPI$$ ./internal/integration
+
+.PHONY: coverage
+coverage:
+	go test -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out | tail -n 1
