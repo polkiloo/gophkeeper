@@ -14,13 +14,13 @@ const (
 
 // RecordChange captures a delta for synchronization.
 type RecordChange struct {
-	RecordID  RecordID
-	OwnerID   UserID
-	Type      RecordType
-	Change    ChangeType
-	Payload   Payload
-	Meta      Metadata
-	Version   Version
+	RecordID   RecordID
+	OwnerID    UserID
+	Type       RecordType
+	Change     ChangeType
+	Payload    Payload
+	Meta       Metadata
+	Version    Version
 	HappenedAt time.Time
 }
 

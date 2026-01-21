@@ -29,6 +29,8 @@ type RecordFilter struct {
 	Query  string
 	Limit  int
 	Offset int
+	// IncludeDeleted controls whether deleted records are returned.
+	IncludeDeleted bool
 }
 
 // ChangeLogRepository stores synchronization deltas.

@@ -1,0 +1,7 @@
+OPENAPI_SPEC=api/openapi.yaml
+OPENAPI_OUT=internal/transport/httpapi/openapi.gen.go
+OPENAPI_PKG=httpapi
+
+.PHONY: openapi-gen
+openapi-gen:
+	go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen -generate gin,types -package $(OPENAPI_PKG) -o $(OPENAPI_OUT) $(OPENAPI_SPEC)

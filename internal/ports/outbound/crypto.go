@@ -1,6 +1,9 @@
 package outbound
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // PasswordHasher hashes and verifies passwords.
 type PasswordHasher interface {
@@ -8,10 +11,16 @@ type PasswordHasher interface {
 	Compare(ctx context.Context, password, hash string) error
 }
 
+// TokenClaims represents verified token data.
+type TokenClaims struct {
+	Subject   string
+	ExpiresAt time.Time
+}
+
 // TokenIssuer signs and validates access tokens.
 type TokenIssuer interface {
-	Issue(ctx context.Context, subject string) (string, error)
-	Validate(ctx context.Context, token string) (string, error)
+	Issue(ctx context.Context, subject string, ttl time.Duration) (string, time.Time, error)
+	Validate(ctx context.Context, token string) (TokenClaims, error)
 }
 
 // Encryptor encrypts and decrypts record payloads.
