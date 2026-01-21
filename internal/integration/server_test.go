@@ -3,9 +3,7 @@
 package integration
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,11 +13,9 @@ import (
 
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
-)
 
-type sessionResponse struct {
-	Token string `json:"token"`
-}
+	"gophkeeper/internal/ports/remote/openapi"
+)
 
 func TestServerContainerAPI(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -66,66 +62,156 @@ func TestServerContainerAPI(t *testing.T) {
 		t.Fatalf("failed to resolve container port: %v", err)
 	}
 
-	baseURL := fmt.Sprintf("http://%s:%s/api/v1", host, port.Port())
-	client := &http.Client{Timeout: 10 * time.Second}
-
-	registerBody := map[string]string{"login": "alice", "password": "secret"}
-	registerStatus := doJSONRequest(t, client, http.MethodPost, baseURL+"/auth/register", registerBody, nil)
-	if registerStatus != http.StatusOK {
-		t.Fatalf("unexpected register status: %d", registerStatus)
-	}
-
-	loginBody := map[string]string{"login": "alice", "password": "secret"}
-	var session sessionResponse
-	loginStatus := doJSONRequest(t, client, http.MethodPost, baseURL+"/auth/login", loginBody, &session)
-	if loginStatus != http.StatusOK {
-		t.Fatalf("unexpected login status: %d", loginStatus)
-	}
-	if session.Token == "" {
-		t.Fatalf("expected session token")
-	}
-
-	validateReq, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/auth/validate", nil)
+	baseURL := fmt.Sprintf("http://%s:%s/api", host, port.Port())
+	client, err := openapi.NewClientWithResponses(baseURL)
 	if err != nil {
-		t.Fatalf("failed to create validate request: %v", err)
+		t.Fatalf("failed to create client: %v", err)
 	}
-	validateReq.Header.Set("Authorization", "Bearer "+session.Token)
 
-	resp, err := client.Do(validateReq)
+	registerResp, err := client.RegisterWithResponse(ctx, openapi.RegisterRequest{Login: "alice", Password: "secret"})
+	if err != nil {
+		t.Fatalf("register request failed: %v", err)
+	}
+	if registerResp.StatusCode() != http.StatusOK {
+		t.Fatalf("unexpected register status: %d", registerResp.StatusCode())
+	}
+
+	loginResp, err := client.LoginWithResponse(ctx, openapi.LoginRequest{Login: "alice", Password: "secret"})
+	if err != nil {
+		t.Fatalf("login request failed: %v", err)
+	}
+	if loginResp.StatusCode() != http.StatusOK || loginResp.JSON200 == nil {
+		t.Fatalf("unexpected login status: %d", loginResp.StatusCode())
+	}
+	if loginResp.JSON200.Token == "" {
+		t.Fatalf("expected login token")
+	}
+
+	token := loginResp.JSON200.Token
+	userID := loginResp.JSON200.UserId
+
+	validateResp, err := client.ValidateWithResponse(ctx, authEditor(token))
 	if err != nil {
 		t.Fatalf("validate request failed: %v", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected validate status: %d", resp.StatusCode)
+	if validateResp.StatusCode() != http.StatusOK {
+		t.Fatalf("unexpected validate status: %d", validateResp.StatusCode())
+	}
+
+	payload := mustTextPayload(t, "secret-data")
+	upsertReq := openapi.RecordUpsert{Type: openapi.Text, Payload: payload, Meta: openapi.Metadata{}}
+	upsertResp, err := client.UpsertRecordWithResponse(ctx, upsertReq, authEditor(token))
+	if err != nil {
+		t.Fatalf("upsert request failed: %v", err)
+	}
+	if upsertResp.StatusCode() != http.StatusOK || upsertResp.JSON200 == nil {
+		t.Fatalf("unexpected upsert status: %d", upsertResp.StatusCode())
+	}
+	recordID := upsertResp.JSON200.Id
+
+	getResp, err := client.GetRecordWithResponse(ctx, recordID, authEditor(token))
+	if err != nil {
+		t.Fatalf("get request failed: %v", err)
+	}
+	if getResp.StatusCode() != http.StatusOK {
+		t.Fatalf("unexpected get status: %d", getResp.StatusCode())
+	}
+
+	listResp, err := client.ListRecordsWithResponse(ctx, &openapi.ListRecordsParams{}, authEditor(token))
+	if err != nil {
+		t.Fatalf("list request failed: %v", err)
+	}
+	if listResp.StatusCode() != http.StatusOK || listResp.JSON200 == nil {
+		t.Fatalf("unexpected list status: %d", listResp.StatusCode())
+	}
+	if !recordPresent(listResp.JSON200, recordID) {
+		t.Fatalf("record not found in list")
+	}
+
+	pullResp, err := client.PullSyncWithResponse(ctx, &openapi.PullSyncParams{}, authEditor(token))
+	if err != nil {
+		t.Fatalf("pull request failed: %v", err)
+	}
+	if pullResp.StatusCode() != http.StatusOK || pullResp.JSON200 == nil {
+		t.Fatalf("unexpected pull status: %d", pullResp.StatusCode())
+	}
+	if len(pullResp.JSON200.Changes) == 0 {
+		t.Fatalf("expected sync changes")
+	}
+
+	syncPayload := mustTextPayload(t, "sync-data")
+	meta := openapi.Metadata{}
+	change := openapi.RecordChange{
+		RecordId:   fmt.Sprintf("sync-%d", time.Now().UnixNano()),
+		OwnerId:    userID,
+		Type:       openapi.Text,
+		Change:     openapi.Upsert,
+		Payload:    &syncPayload,
+		Meta:       &meta,
+		Version:    1,
+		HappenedAt: time.Now().UTC(),
+	}
+	pushResp, err := client.PushSyncWithResponse(ctx, openapi.SyncPush{Changes: []openapi.RecordChange{change}}, authEditor(token))
+	if err != nil {
+		t.Fatalf("push request failed: %v", err)
+	}
+	if pushResp.StatusCode() != http.StatusOK || pushResp.JSON200 == nil {
+		t.Fatalf("unexpected push status: %d", pushResp.StatusCode())
+	}
+	if pushResp.JSON200.Applied != 1 {
+		t.Fatalf("expected applied=1")
+	}
+
+	getSyncedResp, err := client.GetRecordWithResponse(ctx, change.RecordId, authEditor(token))
+	if err != nil {
+		t.Fatalf("get synced record failed: %v", err)
+	}
+	if getSyncedResp.StatusCode() != http.StatusOK {
+		t.Fatalf("unexpected get synced status: %d", getSyncedResp.StatusCode())
+	}
+
+	deleteResp, err := client.DeleteRecordWithResponse(ctx, recordID, authEditor(token))
+	if err != nil {
+		t.Fatalf("delete request failed: %v", err)
+	}
+	if deleteResp.StatusCode() != http.StatusNoContent {
+		t.Fatalf("unexpected delete status: %d", deleteResp.StatusCode())
+	}
+
+	getDeletedResp, err := client.GetRecordWithResponse(ctx, recordID, authEditor(token))
+	if err != nil {
+		t.Fatalf("get deleted record failed: %v", err)
+	}
+	if getDeletedResp.StatusCode() != http.StatusNotFound {
+		t.Fatalf("unexpected deleted get status: %d", getDeletedResp.StatusCode())
 	}
 }
 
-func doJSONRequest(t *testing.T, client *http.Client, method, url string, body any, out any) int {
-	payload, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("failed to marshal body: %v", err)
+func authEditor(token string) openapi.RequestEditorFn {
+	return func(ctx context.Context, req *http.Request) error {
+		req.Header.Set("Authorization", "Bearer "+token)
+		return nil
 	}
-	req, err := http.NewRequest(method, url, bytes.NewReader(payload))
-	if err != nil {
-		t.Fatalf("failed to build request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
+}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
+func mustTextPayload(t *testing.T, text string) openapi.Payload {
+	var payload openapi.Payload
+	if err := payload.FromTextPayload(openapi.TextPayload{Kind: openapi.Text, Text: text}); err != nil {
+		t.Fatalf("failed to build payload: %v", err)
 	}
-	defer resp.Body.Close()
+	return payload
+}
 
-	if out != nil {
-		decoder := json.NewDecoder(resp.Body)
-		if err := decoder.Decode(out); err != nil {
-			t.Fatalf("failed to decode response: %v", err)
+func recordPresent(records *[]openapi.Record, id string) bool {
+	if records == nil {
+		return false
+	}
+	for _, record := range *records {
+		if record.Id == id {
+			return true
 		}
 	}
-
-	return resp.StatusCode
+	return false
 }
 
 func repoRoot() (string, error) {
