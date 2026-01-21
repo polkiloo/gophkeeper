@@ -5,3 +5,7 @@ OPENAPI_PKG=httpapi
 .PHONY: openapi-gen
 openapi-gen:
 	go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen -generate gin,types -package $(OPENAPI_PKG) -o $(OPENAPI_OUT) $(OPENAPI_SPEC)
+
+.PHONY: test-integration
+test-integration:
+	go test -tags=integration -run ^TestServerContainerAPI$$ ./internal/integration
