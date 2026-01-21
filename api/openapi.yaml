@@ -1,0 +1,383 @@
+openapi: 3.0.3
+info:
+  title: GophKeeper API
+  version: 0.1.0
+  description: API for authentication, secret storage, and synchronization.
+servers:
+  - url: /api
+security:
+  - bearerAuth: []
+paths:
+  /v1/auth/register:
+    post:
+      summary: Register a new user
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: Registered user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+  /v1/auth/login:
+    post:
+      summary: Authenticate a user
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+  /v1/auth/validate:
+    get:
+      summary: Validate an access token
+      operationId: validate
+      responses:
+        '200':
+          description: Valid session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+  /v1/records:
+    get:
+      summary: List records
+      operationId: listRecords
+      parameters:
+        - in: query
+          name: type
+          schema:
+            $ref: '#/components/schemas/RecordType'
+        - in: query
+          name: tag
+          schema:
+            type: string
+        - in: query
+          name: query
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            format: int32
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            format: int32
+      responses:
+        '200':
+          description: Records list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Record'
+    post:
+      summary: Create or update a record
+      operationId: upsertRecord
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordUpsert'
+      responses:
+        '200':
+          description: Updated record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Record'
+  /v1/records/{id}:
+    get:
+      summary: Fetch a record by id
+      operationId: getRecord
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Record'
+    delete:
+      summary: Delete a record
+      operationId: deleteRecord
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+  /v1/sync:
+    get:
+      summary: Pull record changes
+      operationId: pullSync
+      parameters:
+        - in: query
+          name: cursor
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            format: int32
+      responses:
+        '200':
+          description: Sync batch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncBatch'
+    post:
+      summary: Push record changes
+      operationId: pushSync
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncPush'
+      responses:
+        '200':
+          description: Sync result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResult'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [login, password]
+      properties:
+        login:
+          type: string
+        password:
+          type: string
+    LoginRequest:
+      type: object
+      required: [login, password]
+      properties:
+        login:
+          type: string
+        password:
+          type: string
+    User:
+      type: object
+      required: [id, login, created_at]
+      properties:
+        id:
+          type: string
+        login:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    Session:
+      type: object
+      required: [user_id, token, expires_at]
+      properties:
+        user_id:
+          type: string
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    RecordType:
+      type: string
+      enum: [credential, text, binary, bank_card]
+    Metadata:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        attributes:
+          type: object
+          additionalProperties:
+            type: string
+    PayloadBase:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          $ref: '#/components/schemas/RecordType'
+    CredentialPayload:
+      allOf:
+        - $ref: '#/components/schemas/PayloadBase'
+        - type: object
+          required: [login, password]
+          properties:
+            login:
+              type: string
+            password:
+              type: string
+    TextPayload:
+      allOf:
+        - $ref: '#/components/schemas/PayloadBase'
+        - type: object
+          required: [text]
+          properties:
+            text:
+              type: string
+    BinaryPayload:
+      allOf:
+        - $ref: '#/components/schemas/PayloadBase'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: string
+              format: byte
+    BankCardPayload:
+      allOf:
+        - $ref: '#/components/schemas/PayloadBase'
+        - type: object
+          required: [cardholder, number, expires_at, cvv]
+          properties:
+            cardholder:
+              type: string
+            number:
+              type: string
+            expires_at:
+              type: string
+            cvv:
+              type: string
+    Payload:
+      oneOf:
+        - $ref: '#/components/schemas/CredentialPayload'
+        - $ref: '#/components/schemas/TextPayload'
+        - $ref: '#/components/schemas/BinaryPayload'
+        - $ref: '#/components/schemas/BankCardPayload'
+      description: Record payload variant.
+    Record:
+      type: object
+      required: [id, owner_id, type, payload, meta, version, updated_at]
+      properties:
+        id:
+          type: string
+        owner_id:
+          type: string
+        type:
+          $ref: '#/components/schemas/RecordType'
+        payload:
+          $ref: '#/components/schemas/Payload'
+        meta:
+          $ref: '#/components/schemas/Metadata'
+        version:
+          type: integer
+          format: int64
+        updated_at:
+          type: string
+          format: date-time
+    RecordUpsert:
+      type: object
+      required: [type, payload, meta]
+      properties:
+        id:
+          type: string
+        type:
+          $ref: '#/components/schemas/RecordType'
+        payload:
+          $ref: '#/components/schemas/Payload'
+        meta:
+          $ref: '#/components/schemas/Metadata'
+        version:
+          type: integer
+          format: int64
+    ChangeType:
+      type: string
+      enum: [upsert, delete]
+    RecordChange:
+      type: object
+      required: [record_id, owner_id, type, change, version, happened_at]
+      properties:
+        record_id:
+          type: string
+        owner_id:
+          type: string
+        type:
+          $ref: '#/components/schemas/RecordType'
+        change:
+          $ref: '#/components/schemas/ChangeType'
+        payload:
+          $ref: '#/components/schemas/Payload'
+        meta:
+          $ref: '#/components/schemas/Metadata'
+        version:
+          type: integer
+          format: int64
+        happened_at:
+          type: string
+          format: date-time
+    SyncBatch:
+      type: object
+      required: [changes, cursor]
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecordChange'
+        cursor:
+          type: string
+    SyncPush:
+      type: object
+      required: [changes]
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecordChange'
+    SyncResult:
+      type: object
+      required: [applied, rejected, conflicts]
+      properties:
+        applied:
+          type: integer
+          format: int32
+        rejected:
+          type: integer
+          format: int32
+        conflicts:
+          type: array
+          items:
+            type: string
