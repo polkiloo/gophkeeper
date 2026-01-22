@@ -16,4 +16,7 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Keycloak.BaseURL == "" || cfg.Keycloak.Realm == "" || cfg.Keycloak.ClientID == "" {
 		t.Fatalf("expected keycloak defaults")
 	}
+	if cfg.StorageBackend == "" {
+		t.Fatalf("expected storage backend")
+	}
 }

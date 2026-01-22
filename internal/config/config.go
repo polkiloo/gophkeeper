@@ -8,11 +8,13 @@ import (
 
 // Config stores server configuration values.
 type Config struct {
-	Addr         string
-	TokenSecret  string
-	TokenTTL     time.Duration
-	AuthProvider string
-	Keycloak     KeycloakConfig
+	Addr           string
+	TokenSecret    string
+	TokenTTL       time.Duration
+	AuthProvider   string
+	Keycloak       KeycloakConfig
+	StorageBackend string
+	PostgresDSN    string
 }
 
 // KeycloakConfig configures Keycloak authentication.
@@ -44,6 +46,8 @@ func Load() Config {
 			AdminClientID:     getenv("KEYCLOAK_ADMIN_CLIENT_ID", "admin-cli"),
 			AdminClientSecret: getenv("KEYCLOAK_ADMIN_CLIENT_SECRET", ""),
 		},
+		StorageBackend: getenv("GOPHKEEPER_STORAGE", "memory"),
+		PostgresDSN:    getenv("GOPHKEEPER_PG_DSN", ""),
 	}
 }
 

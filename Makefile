@@ -9,7 +9,7 @@ openapi-gen:
 
 .PHONY: test-integration
 test-integration:
-	go test -tags=integration -run ^TestServerContainerAPI$$ ./internal/integration
+	go test -tags=integration ./internal/integration
 
 .PHONY: coverage
 coverage:

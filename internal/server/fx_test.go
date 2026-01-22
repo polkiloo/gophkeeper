@@ -6,7 +6,7 @@ import (
 	"go.uber.org/fx"
 
 	"gophkeeper/internal/adapters/crypto"
-	"gophkeeper/internal/adapters/memory"
+	"gophkeeper/internal/adapters/persistence"
 	"gophkeeper/internal/adapters/system"
 	"gophkeeper/internal/app/auth"
 	"gophkeeper/internal/app/auth/keycloak"
@@ -15,6 +15,7 @@ import (
 	"gophkeeper/internal/app/sync"
 	"gophkeeper/internal/config"
 	"gophkeeper/internal/logger"
+	"gophkeeper/internal/migrate"
 	"gophkeeper/internal/transport/httpapi"
 )
 
@@ -23,7 +24,7 @@ func TestFxGraphValid(t *testing.T) {
 		logger.Module,
 		config.Module,
 		system.Module,
-		memory.Module,
+		persistence.Module,
 		crypto.Module,
 		auth.Module,
 		keycloak.Module,
@@ -31,6 +32,7 @@ func TestFxGraphValid(t *testing.T) {
 		secrets.Module,
 		sync.Module,
 		httpapi.Module,
+		migrate.Module,
 		Module,
 	)
 	if err := app.Err(); err != nil {

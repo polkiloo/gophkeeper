@@ -56,11 +56,37 @@ func (s *Service) Register(ctx context.Context, input inbound.RegisterInput) (do
 	}
 
 	createPayload := struct {
-		Username string `json:"username"`
-		Enabled  bool   `json:"enabled"`
+		Username        string   `json:"username"`
+		Enabled         bool     `json:"enabled"`
+		Email           string   `json:"email,omitempty"`
+		FirstName       string   `json:"firstName,omitempty"`
+		LastName        string   `json:"lastName,omitempty"`
+		EmailVerified   bool     `json:"emailVerified"`
+		RequiredActions []string `json:"requiredActions"`
+		Credentials     []struct {
+			Type      string `json:"type"`
+			Value     string `json:"value"`
+			Temporary bool   `json:"temporary"`
+		} `json:"credentials"`
 	}{
-		Username: login,
-		Enabled:  true,
+		Username:        login,
+		Enabled:         true,
+		Email:           login + "@example.com",
+		FirstName:       "Gophkeeper",
+		LastName:        "User",
+		EmailVerified:   true,
+		RequiredActions: []string{},
+		Credentials: []struct {
+			Type      string `json:"type"`
+			Value     string `json:"value"`
+			Temporary bool   `json:"temporary"`
+		}{
+			{
+				Type:      "password",
+				Value:     password,
+				Temporary: false,
+			},
+		},
 	}
 
 	resp, err := s.doJSON(ctx, http.MethodPost, s.realmURL("/admin/realms/%s/users", s.cfg.Realm), adminToken, createPayload)
@@ -81,23 +107,21 @@ func (s *Service) Register(ctx context.Context, input inbound.RegisterInput) (do
 		return domain.User{}, err
 	}
 
-	passwordPayload := struct {
-		Type      string `json:"type"`
-		Value     string `json:"value"`
-		Temporary bool   `json:"temporary"`
-	}{
-		Type:      "password",
-		Value:     password,
-		Temporary: false,
-	}
-
-	resetResp, err := s.doJSON(ctx, http.MethodPut, s.realmURL("/admin/realms/%s/users/%s/reset-password", s.cfg.Realm, userID), adminToken, passwordPayload)
+	userPayload, err := s.fetchUser(ctx, adminToken, userID)
 	if err != nil {
 		return domain.User{}, err
 	}
-	defer resetResp.Body.Close()
-	if resetResp.StatusCode != http.StatusNoContent {
-		return domain.User{}, readHTTPError(resetResp)
+	userPayload["requiredActions"] = []string{}
+	userPayload["emailVerified"] = true
+	userPayload["enabled"] = true
+
+	patchResp, err := s.doJSON(ctx, http.MethodPut, s.realmURL("/admin/realms/%s/users/%s", s.cfg.Realm, userID), adminToken, userPayload)
+	if err != nil {
+		return domain.User{}, err
+	}
+	defer patchResp.Body.Close()
+	if patchResp.StatusCode != http.StatusNoContent {
+		return domain.User{}, readHTTPError(patchResp)
 	}
 
 	return domain.User{
@@ -231,6 +255,29 @@ func (s *Service) doJSON(ctx context.Context, method, url string, token string, 
 	}
 
 	return s.client.Do(req)
+}
+
+func (s *Service) fetchUser(ctx context.Context, token, userID string) (map[string]interface{}, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.realmURL("/admin/realms/%s/users/%s", s.cfg.Realm, userID), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, readHTTPError(resp)
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 func (s *Service) doForm(ctx context.Context, method, url string, values url.Values, clientID, clientSecret string) (*http.Response, error) {

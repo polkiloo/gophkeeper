@@ -3,12 +3,12 @@
 package integration
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,8 +31,8 @@ func TestKeycloakAuthIntegration(t *testing.T) {
 		_ = net.Remove(context.Background())
 	})
 
-	keycloakURL, keycloakNetworkURL := startKeycloakContainer(t, ctx, net.Name)
-	setupKeycloakRealm(t, ctx, keycloakURL)
+	keycloakContainer, keycloakNetworkURL, keycloakHostURL := startKeycloakContainer(t, ctx, net.Name)
+	setupKeycloakRealm(t, ctx, keycloakContainer)
 
 	client := startServerWithKeycloak(t, ctx, net.Name, keycloakNetworkURL)
 
@@ -49,7 +49,9 @@ func TestKeycloakAuthIntegration(t *testing.T) {
 		t.Fatalf("login failed: %v", err)
 	}
 	if loginResp.StatusCode() != http.StatusOK || loginResp.JSON200 == nil {
-		t.Fatalf("unexpected login status: %d", loginResp.StatusCode())
+		status, body := debugTokenRequest(t, ctx, keycloakHostURL, "kc-user", "kc-pass")
+		dumpKeycloakUser(t, ctx, keycloakContainer, "kc-user")
+		t.Fatalf("unexpected login status: %d (token status %d: %s)", loginResp.StatusCode(), status, body)
 	}
 
 	validateResp, err := client.ValidateWithResponse(ctx, authEditor(loginResp.JSON200.Token))
@@ -61,16 +63,21 @@ func TestKeycloakAuthIntegration(t *testing.T) {
 	}
 }
 
-func startKeycloakContainer(t *testing.T, ctx context.Context, networkName string) (string, string) {
+func startKeycloakContainer(t *testing.T, ctx context.Context, networkName string) (testcontainers.Container, string, string) {
 	t.Helper()
 
 	req := testcontainers.ContainerRequest{
 		Image:        "quay.io/keycloak/keycloak:24.0.5",
 		ExposedPorts: []string{"8080/tcp"},
 		Env: map[string]string{
-			"KEYCLOAK_ADMIN":          "admin",
-			"KEYCLOAK_ADMIN_PASSWORD": "admin",
-			"KC_HEALTH_ENABLED":       "true",
+			"KEYCLOAK_ADMIN":              "admin",
+			"KEYCLOAK_ADMIN_PASSWORD":     "admin",
+			"KC_BOOTSTRAP_ADMIN_USERNAME": "admin",
+			"KC_BOOTSTRAP_ADMIN_PASSWORD": "admin",
+			"KC_HTTP_ENABLED":             "true",
+			"KC_HEALTH_ENABLED":           "true",
+			"KC_HOSTNAME_STRICT":          "false",
+			"KC_HOSTNAME_STRICT_HTTPS":    "false",
 		},
 		Cmd: []string{"start-dev", "--http-port=8080"},
 		WaitingFor: wait.ForHTTP("/health/ready").
@@ -102,89 +109,73 @@ func startKeycloakContainer(t *testing.T, ctx context.Context, networkName strin
 		t.Fatalf("failed to resolve keycloak port: %v", err)
 	}
 
-	return fmt.Sprintf("http://%s:%s", host, port.Port()), "http://keycloak:8080"
+	return container, "http://keycloak:8080", fmt.Sprintf("http://%s:%s", host, port.Port())
 }
 
-func setupKeycloakRealm(t *testing.T, ctx context.Context, baseURL string) {
+func setupKeycloakRealm(t *testing.T, ctx context.Context, container testcontainers.Container) {
 	t.Helper()
 
-	adminToken := fetchKeycloakAdminToken(t, ctx, baseURL)
-
-	realmPayload := map[string]interface{}{
-		"realm":   "gophkeeper",
-		"enabled": true,
-	}
-	createKeycloakEntity(t, ctx, baseURL+"/admin/realms", adminToken, realmPayload)
-
-	clientPayload := map[string]interface{}{
-		"clientId":                  "gophkeeper-cli",
-		"enabled":                   true,
-		"directAccessGrantsEnabled": true,
-		"publicClient":              false,
-		"secret":                    "secret",
-		"protocol":                  "openid-connect",
-	}
-	createKeycloakEntity(t, ctx, baseURL+"/admin/realms/gophkeeper/clients", adminToken, clientPayload)
+	runKeycloakCmd(t, ctx, container, "config", "credentials", "--server", "http://localhost:8080", "--realm", "master", "--user", "admin", "--password", "admin")
+	runKeycloakCmd(t, ctx, container, "update", "realms/master", "-s", "sslRequired=NONE")
+	runKeycloakCmd(t, ctx, container, "create", "realms", "-s", "realm=gophkeeper", "-s", "enabled=true", "-s", "sslRequired=NONE")
+	runKeycloakCmd(t, ctx, container, "update", "realms/gophkeeper", "-s", "verifyEmail=false", "-s", "registrationAllowed=true", "-s", "resetPasswordAllowed=true", "-s", "rememberMe=true")
+	runKeycloakCmd(t, ctx, container, "create", "clients", "-r", "gophkeeper", "-s", "clientId=gophkeeper-cli", "-s", "enabled=true", "-s", "directAccessGrantsEnabled=true", "-s", "standardFlowEnabled=true", "-s", "publicClient=false", "-s", "clientAuthenticatorType=client-secret", "-s", "secret=secret", "-s", "protocol=openid-connect")
 }
 
-func fetchKeycloakAdminToken(t *testing.T, ctx context.Context, baseURL string) string {
+func runKeycloakCmd(t *testing.T, ctx context.Context, container testcontainers.Container, args ...string) {
 	t.Helper()
 
-	form := url.Values{}
-	form.Set("grant_type", "password")
-	form.Set("client_id", "admin-cli")
-	form.Set("username", "admin")
-	form.Set("password", "admin")
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/realms/master/protocol/openid-connect/token", bytes.NewBufferString(form.Encode()))
+	cmd := append([]string{"/opt/keycloak/bin/kcadm.sh"}, args...)
+	code, reader, err := container.Exec(ctx, cmd)
 	if err != nil {
-		t.Fatalf("admin token request failed: %v", err)
+		t.Fatalf("keycloak command failed: %v", err)
+	}
+	output, _ := io.ReadAll(reader)
+	outputText := strings.TrimSpace(string(output))
+	if code != 0 {
+		t.Fatalf("keycloak command failed (%d): %s", code, outputText)
+	}
+	if outputText != "" {
+		t.Logf("keycloak: %s", outputText)
+	}
+}
+
+func dumpKeycloakUser(t *testing.T, ctx context.Context, container testcontainers.Container, username string) {
+	t.Helper()
+
+	cmd := []string{"/opt/keycloak/bin/kcadm.sh", "get", "users", "-r", "gophkeeper", "-q", "username=" + username}
+	code, reader, err := container.Exec(ctx, cmd)
+	if err != nil {
+		t.Logf("keycloak user dump failed: %v", err)
+		return
+	}
+	output, _ := io.ReadAll(reader)
+	outputText := strings.TrimSpace(string(output))
+	if code != 0 {
+		t.Logf("keycloak user dump failed (%d): %s", code, outputText)
+		return
+	}
+	t.Logf("keycloak user: %s", outputText)
+}
+
+func debugTokenRequest(t *testing.T, ctx context.Context, baseURL, username, password string) (int, string) {
+	t.Helper()
+
+	form := strings.NewReader("grant_type=password&client_id=gophkeeper-cli&client_secret=secret&username=" + url.QueryEscape(username) + "&password=" + url.QueryEscape(password))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/realms/gophkeeper/protocol/openid-connect/token", form)
+	if err != nil {
+		t.Fatalf("token request failed: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("admin token request failed: %v", err)
+		t.Fatalf("token request failed: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("admin token status: %d", resp.StatusCode)
-	}
 
-	var payload struct {
-		AccessToken string `json:"access_token"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("admin token decode failed: %v", err)
-	}
-	if payload.AccessToken == "" {
-		t.Fatalf("empty admin token")
-	}
-	return payload.AccessToken
-}
-
-func createKeycloakEntity(t *testing.T, ctx context.Context, url, token string, payload map[string]interface{}) {
-	t.Helper()
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("failed to marshal payload: %v", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("failed to build request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("keycloak request failed: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusConflict {
-		t.Fatalf("unexpected keycloak status: %d", resp.StatusCode)
-	}
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, strings.TrimSpace(string(body))
 }
 
 func startServerWithKeycloak(t *testing.T, ctx context.Context, networkName, keycloakNetworkURL string) *openapi.ClientWithResponses {
