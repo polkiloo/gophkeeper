@@ -9,6 +9,8 @@ import (
 	"gophkeeper/internal/adapters/memory"
 	"gophkeeper/internal/adapters/system"
 	"gophkeeper/internal/app/auth"
+	"gophkeeper/internal/app/auth/keycloak"
+	"gophkeeper/internal/app/authprovider"
 	"gophkeeper/internal/app/secrets"
 	"gophkeeper/internal/app/sync"
 	"gophkeeper/internal/config"
@@ -24,6 +26,8 @@ func TestFxGraphValid(t *testing.T) {
 		memory.Module,
 		crypto.Module,
 		auth.Module,
+		keycloak.Module,
+		authprovider.Module,
 		secrets.Module,
 		sync.Module,
 		httpapi.Module,

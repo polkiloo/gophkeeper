@@ -10,4 +10,10 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.TokenTTL == 0 {
 		t.Fatalf("expected token ttl")
 	}
+	if cfg.AuthProvider == "" {
+		t.Fatalf("expected auth provider")
+	}
+	if cfg.Keycloak.BaseURL == "" || cfg.Keycloak.Realm == "" || cfg.Keycloak.ClientID == "" {
+		t.Fatalf("expected keycloak defaults")
+	}
 }
