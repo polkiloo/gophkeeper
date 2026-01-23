@@ -24,6 +24,7 @@ import (
 	"gophkeeper/internal/migrate"
 	"gophkeeper/internal/server"
 	"gophkeeper/internal/transport/httpapi"
+	"gophkeeper/internal/transport/secure"
 )
 
 var (
@@ -51,6 +52,7 @@ func main() {
 		secrets.Module,
 		sync.Module,
 		httpapi.Module,
+		secure.ServerModule,
 		migrate.Module,
 		server.Module,
 	)

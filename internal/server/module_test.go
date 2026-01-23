@@ -12,7 +12,7 @@ func TestNewHTTPServer(t *testing.T) {
 	cfg := config.Config{Addr: ":9999"}
 	handler := http.NewServeMux()
 
-	srv := NewHTTPServer(cfg, handler)
+	srv := NewHTTPServer(cfg, handler, nil)
 	if srv.Addr != ":9999" {
 		t.Fatalf("unexpected addr: %s", srv.Addr)
 	}

@@ -1,10 +1,11 @@
 package openapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -12,64 +13,59 @@ import (
 func TestClientWithResponses(t *testing.T) {
 	now := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		switch r.URL.Path {
-		case "/api/v1/auth/register":
-			writeJSON(w, map[string]any{
-				"id":         "u1",
-				"login":      "login",
-				"created_at": now.Format(time.RFC3339),
-			})
-		case "/api/v1/auth/login":
-			writeJSON(w, map[string]any{
-				"user_id":    "u1",
-				"token":      "token",
-				"expires_at": now.Add(time.Hour).Format(time.RFC3339),
-			})
-		case "/api/v1/auth/validate":
-			if r.Header.Get("Authorization") == "" {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			writeJSON(w, map[string]any{
-				"user_id":    "u1",
-				"token":      "token",
-				"expires_at": now.Add(time.Hour).Format(time.RFC3339),
-			})
-		case "/api/v1/records":
-			if r.Method == http.MethodGet {
-				writeJSON(w, []any{sampleRecord(now)})
-				return
-			}
-			writeJSON(w, sampleRecord(now))
-		case "/api/v1/records/r1":
-			if r.Method == http.MethodDelete {
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-			writeJSON(w, sampleRecord(now))
-		case "/api/v1/sync":
-			if r.Method == http.MethodGet {
-				writeJSON(w, map[string]any{
-					"changes": []any{sampleChange(now)},
-					"cursor":  "1",
+	httpClient := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/api/v1/auth/register":
+				return jsonResponse(http.StatusOK, map[string]any{
+					"id":         "u1",
+					"login":      "login",
+					"created_at": now.Format(time.RFC3339),
 				})
-				return
+			case "/api/v1/auth/login":
+				return jsonResponse(http.StatusOK, map[string]any{
+					"user_id":    "u1",
+					"token":      "token",
+					"expires_at": now.Add(time.Hour).Format(time.RFC3339),
+				})
+			case "/api/v1/auth/validate":
+				if req.Header.Get("Authorization") == "" {
+					return statusResponse(http.StatusUnauthorized), nil
+				}
+				return jsonResponse(http.StatusOK, map[string]any{
+					"user_id":    "u1",
+					"token":      "token",
+					"expires_at": now.Add(time.Hour).Format(time.RFC3339),
+				})
+			case "/api/v1/records":
+				if req.Method == http.MethodGet {
+					return jsonResponse(http.StatusOK, []any{sampleRecord(now)})
+				}
+				return jsonResponse(http.StatusOK, sampleRecord(now))
+			case "/api/v1/records/r1":
+				if req.Method == http.MethodDelete {
+					return statusResponse(http.StatusNoContent), nil
+				}
+				return jsonResponse(http.StatusOK, sampleRecord(now))
+			case "/api/v1/sync":
+				if req.Method == http.MethodGet {
+					return jsonResponse(http.StatusOK, map[string]any{
+						"changes": []any{sampleChange(now)},
+						"cursor":  "1",
+					})
+				}
+				return jsonResponse(http.StatusOK, map[string]any{
+					"applied":   1,
+					"rejected":  0,
+					"conflicts": []string{},
+				})
+			default:
+				return statusResponse(http.StatusNotFound), nil
 			}
-			writeJSON(w, map[string]any{
-				"applied":   1,
-				"rejected":  0,
-				"conflicts": []string{},
-			})
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
+		}),
+	}
 
-	client, err := NewClientWithResponses(server.URL + "/api")
+	client, err := NewClientWithResponses("http://example.com/api", WithHTTPClient(httpClient))
 	if err != nil {
 		t.Fatalf("client error: %v", err)
 	}
@@ -118,6 +114,12 @@ func TestClientWithResponses(t *testing.T) {
 	if err != nil || pushResp.StatusCode() != http.StatusOK {
 		t.Fatalf("push failed")
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }
 
 func TestPayloadRoundTrip(t *testing.T) {
@@ -206,7 +208,22 @@ func mustChange(t *testing.T) RecordChange {
 	}
 }
 
-func writeJSON(w http.ResponseWriter, payload any) {
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(payload)
+func jsonResponse(status int, payload any) (*http.Response, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	resp := statusResponse(status)
+	resp.Header.Set("Content-Type", "application/json")
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	return resp, nil
+}
+
+func statusResponse(status int) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(bytes.NewReader(nil)),
+	}
 }

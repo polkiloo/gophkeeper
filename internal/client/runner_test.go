@@ -5,8 +5,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -72,7 +72,7 @@ func TestParseAttrs(t *testing.T) {
 func TestRunnerUnknownCommand(t *testing.T) {
 	out := new(bytes.Buffer)
 	errOut := new(bytes.Buffer)
-	runner := NewRunner([]string{"cli", "unknown"}, Stdout(out), Stderr(errOut), NewClientFactory(), Config{BaseURL: DefaultBaseURL}, "")
+	runner := NewRunner([]string{"cli", "unknown"}, Stdout(out), Stderr(errOut), NewClientFactory(nil), Config{BaseURL: DefaultBaseURL}, "")
 
 	if err := runner.Run(context.Background()); err == nil {
 		t.Fatalf("expected error")
@@ -83,24 +83,34 @@ func TestRunnerUnknownCommand(t *testing.T) {
 }
 
 func TestRunnerAuthRegister(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/auth/register" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id":         "u1",
-			"login":      "login",
-			"created_at": time.Now().Format(time.RFC3339),
-		})
-	}))
-	defer server.Close()
+	httpClient := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path != "/api/v1/auth/register" {
+				return &http.Response{
+					StatusCode: http.StatusNotFound,
+					Body:       io.NopCloser(bytes.NewReader(nil)),
+					Header:     make(http.Header),
+				}, nil
+			}
+			body, _ := json.Marshal(map[string]any{
+				"id":         "u1",
+				"login":      "login",
+				"created_at": time.Now().Format(time.RFC3339),
+			})
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewReader(body)),
+				Header:     make(http.Header),
+			}
+			resp.Header.Set("Content-Type", "application/json")
+			return resp, nil
+		}),
+	}
 
 	out := new(bytes.Buffer)
 	errOut := new(bytes.Buffer)
-	cfg := Config{BaseURL: server.URL + "/api"}
-	runner := NewRunner([]string{"cli"}, Stdout(out), Stderr(errOut), NewClientFactory(), cfg, "")
+	cfg := Config{BaseURL: "http://example.com/api"}
+	runner := NewRunner([]string{"cli"}, Stdout(out), Stderr(errOut), NewClientFactory(httpClient), cfg, "")
 
 	if err := runner.handleAuth(context.Background(), []string{"register", "-login", "login", "-password", "pass"}); err != nil {
 		t.Fatalf("register error: %v", err)
@@ -110,13 +120,19 @@ func TestRunnerAuthRegister(t *testing.T) {
 	}
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
 func TestRunnerConfigInit(t *testing.T) {
 	out := new(bytes.Buffer)
 	errOut := new(bytes.Buffer)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "client.yaml")
 
-	runner := NewRunner([]string{"cli"}, Stdout(out), Stderr(errOut), NewClientFactory(), Config{BaseURL: DefaultBaseURL}, ConfigPath(path))
+	runner := NewRunner([]string{"cli"}, Stdout(out), Stderr(errOut), NewClientFactory(nil), Config{BaseURL: DefaultBaseURL}, ConfigPath(path))
 	if err := runner.handleConfig(context.Background(), []string{"init", "-path", path, "-base-url", "http://example.com/api"}); err != nil {
 		t.Fatalf("config init error: %v", err)
 	}
@@ -135,35 +151,35 @@ func TestRunnerConfigInit(t *testing.T) {
 }
 
 func TestRunnerConfigUnknown(t *testing.T) {
-	runner := NewRunner([]string{"cli"}, Stdout(new(bytes.Buffer)), Stderr(new(bytes.Buffer)), NewClientFactory(), Config{BaseURL: DefaultBaseURL}, "")
+	runner := NewRunner([]string{"cli"}, Stdout(new(bytes.Buffer)), Stderr(new(bytes.Buffer)), NewClientFactory(nil), Config{BaseURL: DefaultBaseURL}, "")
 	if err := runner.handleConfig(context.Background(), []string{"unknown"}); err == nil {
 		t.Fatalf("expected error")
 	}
 }
 
 func TestRunnerAuthValidateMissingToken(t *testing.T) {
-	runner := NewRunner([]string{"cli"}, Stdout(new(bytes.Buffer)), Stderr(new(bytes.Buffer)), NewClientFactory(), Config{BaseURL: DefaultBaseURL}, "")
+	runner := NewRunner([]string{"cli"}, Stdout(new(bytes.Buffer)), Stderr(new(bytes.Buffer)), NewClientFactory(nil), Config{BaseURL: DefaultBaseURL}, "")
 	if err := runner.handleAuth(context.Background(), []string{"validate"}); err == nil {
 		t.Fatalf("expected error")
 	}
 }
 
 func TestRunnerRecordsMissingToken(t *testing.T) {
-	runner := NewRunner([]string{"cli"}, Stdout(new(bytes.Buffer)), Stderr(new(bytes.Buffer)), NewClientFactory(), Config{BaseURL: DefaultBaseURL}, "")
+	runner := NewRunner([]string{"cli"}, Stdout(new(bytes.Buffer)), Stderr(new(bytes.Buffer)), NewClientFactory(nil), Config{BaseURL: DefaultBaseURL}, "")
 	if err := runner.handleRecords(context.Background(), []string{"list"}); err == nil {
 		t.Fatalf("expected error")
 	}
 }
 
 func TestRunnerSyncPushMissingFile(t *testing.T) {
-	runner := NewRunner([]string{"cli"}, Stdout(new(bytes.Buffer)), Stderr(new(bytes.Buffer)), NewClientFactory(), Config{BaseURL: DefaultBaseURL}, "")
+	runner := NewRunner([]string{"cli"}, Stdout(new(bytes.Buffer)), Stderr(new(bytes.Buffer)), NewClientFactory(nil), Config{BaseURL: DefaultBaseURL}, "")
 	if err := runner.handleSync(context.Background(), []string{"push"}); err == nil {
 		t.Fatalf("expected error")
 	}
 }
 
 func TestPrintResponseError(t *testing.T) {
-	runner := NewRunner([]string{"cli"}, Stdout(new(bytes.Buffer)), Stderr(new(bytes.Buffer)), NewClientFactory(), Config{BaseURL: DefaultBaseURL}, "")
+	runner := NewRunner([]string{"cli"}, Stdout(new(bytes.Buffer)), Stderr(new(bytes.Buffer)), NewClientFactory(nil), Config{BaseURL: DefaultBaseURL}, "")
 	resp := &http.Response{StatusCode: http.StatusInternalServerError, Status: "500 Internal Server Error"}
 	if err := runner.printResponse(resp, []byte("boom"), nil); err == nil {
 		t.Fatalf("expected error")

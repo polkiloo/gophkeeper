@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"log"
 	"net/http"
 	"time"
@@ -19,10 +20,11 @@ var Module = fx.Options(
 )
 
 // NewHTTPServer constructs an HTTP server instance.
-func NewHTTPServer(cfg config.Config, handler http.Handler) *http.Server {
+func NewHTTPServer(cfg config.Config, handler http.Handler, tlsConfig *tls.Config) *http.Server {
 	return &http.Server{
 		Addr:         cfg.Addr,
 		Handler:      handler,
+		TLSConfig:    tlsConfig,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  30 * time.Second,
@@ -30,11 +32,17 @@ func NewHTTPServer(cfg config.Config, handler http.Handler) *http.Server {
 }
 
 // RegisterHooks starts and stops the HTTP server.
-func RegisterHooks(lc fx.Lifecycle, srv *http.Server, logger *log.Logger) {
+func RegisterHooks(lc fx.Lifecycle, srv *http.Server, logger *log.Logger, cfg config.Config) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			go func() {
-				if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				var err error
+				if cfg.TLSEnabled {
+					err = srv.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile)
+				} else {
+					err = srv.ListenAndServe()
+				}
+				if err != nil && err != http.ErrServerClosed {
 					logger.Printf("server failed: %v", err)
 				}
 			}()

@@ -17,6 +17,7 @@ import (
 	"gophkeeper/internal/logger"
 	"gophkeeper/internal/migrate"
 	"gophkeeper/internal/transport/httpapi"
+	"gophkeeper/internal/transport/secure"
 )
 
 func TestFxGraphValid(t *testing.T) {
@@ -32,6 +33,7 @@ func TestFxGraphValid(t *testing.T) {
 		secrets.Module,
 		sync.Module,
 		httpapi.Module,
+		secure.ServerModule,
 		migrate.Module,
 		Module,
 	)

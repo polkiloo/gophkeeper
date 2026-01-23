@@ -3,6 +3,7 @@ package client
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -15,7 +16,10 @@ type ConfigPath string
 
 // Config stores CLI settings.
 type Config struct {
-	BaseURL string `yaml:"baseurl"`
+	BaseURL               string `yaml:"baseurl"`
+	TransportKey          string `yaml:"transport_key"`
+	TLSCAFile             string `yaml:"tls_ca_file"`
+	TLSInsecureSkipVerify bool   `yaml:"tls_insecure_skip_verify"`
 }
 
 // ConfigPathFromEnv returns the config path from environment or empty.
@@ -57,6 +61,17 @@ func LoadConfig(path ConfigPath) (Config, error) {
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = DefaultBaseURL
+	}
+	if envKey := os.Getenv("GOPHKEEPER_TRANSPORT_KEY"); envKey != "" {
+		cfg.TransportKey = envKey
+	}
+	if envCA := os.Getenv("GOPHKEEPER_CLIENT_TLS_CA"); envCA != "" {
+		cfg.TLSCAFile = envCA
+	}
+	if envInsecure := os.Getenv("GOPHKEEPER_CLIENT_TLS_INSECURE"); envInsecure != "" {
+		if parsed, err := strconv.ParseBool(envInsecure); err == nil {
+			cfg.TLSInsecureSkipVerify = parsed
+		}
 	}
 	return cfg, nil
 }

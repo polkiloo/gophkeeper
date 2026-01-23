@@ -57,9 +57,12 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
-func NewClientFactory() ClientFactory {
+func NewClientFactory(httpClient *http.Client) ClientFactory {
 	return func(baseURL string) (*openapi.ClientWithResponses, error) {
-		return openapi.NewClientWithResponses(baseURL)
+		if httpClient == nil {
+			return openapi.NewClientWithResponses(baseURL)
+		}
+		return openapi.NewClientWithResponses(baseURL, openapi.WithHTTPClient(httpClient))
 	}
 }
 
