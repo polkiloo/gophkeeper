@@ -1,0 +1,4 @@
+baseurl: "http://localhost:8080/api"
+transport_key: ""
+tls_ca_file: ""
+tls_insecure_skip_verify: false
