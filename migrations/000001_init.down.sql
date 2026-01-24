@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS change_log;
+DROP TABLE IF EXISTS records;
+DROP TABLE IF EXISTS users;
