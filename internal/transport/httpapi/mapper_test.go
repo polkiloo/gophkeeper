@@ -175,3 +175,16 @@ func TestRecordFromOpenAPIErrors(t *testing.T) {
 		t.Fatalf("expected error")
 	}
 }
+
+func TestDerefHelpers(t *testing.T) {
+	if derefInt64(nil) != 0 {
+		t.Fatalf("expected zero")
+	}
+	value := int64(7)
+	if derefInt64(&value) != 7 {
+		t.Fatalf("unexpected value")
+	}
+	if derefMetadata(nil).Title != nil {
+		t.Fatalf("expected empty metadata")
+	}
+}

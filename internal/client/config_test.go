@@ -67,3 +67,19 @@ func TestLoadConfigEnvOverridesTransportKey(t *testing.T) {
 		t.Fatalf("expected tls insecure flag")
 	}
 }
+
+func TestConfigPathFromEnv(t *testing.T) {
+	if ConfigPathFromEnv() != "" {
+		t.Fatalf("expected empty path")
+	}
+	t.Setenv("GOPHKEEPER_CLIENT_CONFIG", "/tmp/client.yaml")
+	if ConfigPathFromEnv() != ConfigPath("/tmp/client.yaml") {
+		t.Fatalf("unexpected path")
+	}
+}
+
+func TestDefaultConfigPath(t *testing.T) {
+	if DefaultConfigPath() == "" {
+		t.Fatalf("expected default path")
+	}
+}
