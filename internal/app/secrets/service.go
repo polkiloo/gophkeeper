@@ -38,65 +38,53 @@ func (s *Service) Upsert(ctx context.Context, record domain.Record) (domain.Reco
 	record.OwnerID = ownerID
 	record.UpdatedAt = s.clock.Now()
 
-	if record.Type == "" {
-		return domain.Record{}, errors.New("record type is required")
-	}
-	if record.Payload == nil {
-		return domain.Record{}, errors.New("record payload is required")
+	if err := validateRecord(record); err != nil {
+		return domain.Record{}, err
 	}
 
 	if record.ID == "" {
-		record.ID = domain.RecordID(s.idGen.NewID())
-		if record.Version <= 0 {
-			record.Version = 1
-		}
-		saved, err := s.records.Upsert(ctx, record)
-		if err != nil {
-			return domain.Record{}, err
-		}
-		if err := s.appendChange(ctx, saved, domain.ChangeUpsert); err != nil {
-			return domain.Record{}, err
-		}
-		return saved, nil
+		return s.createRecord(ctx, record)
 	}
 
-	current, err := s.records.Get(ctx, record.ID)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			if record.Version <= 0 {
-				record.Version = 1
-			}
-			saved, err := s.records.Upsert(ctx, record)
-			if err != nil {
-				return domain.Record{}, err
-			}
-			if err := s.appendChange(ctx, saved, domain.ChangeUpsert); err != nil {
-				return domain.Record{}, err
-			}
-			return saved, nil
-		}
-		return domain.Record{}, err
-	}
+	return s.updateRecord(ctx, ownerID, record)
+}
 
-	if current.OwnerID != ownerID {
+// Create stores a new record for the authenticated user.
+func (s *Service) Create(ctx context.Context, record domain.Record) (domain.Record, error) {
+	ownerID, ok := app.UserIDFromContext(ctx)
+	if !ok {
 		return domain.Record{}, domain.ErrUnauthorized
 	}
 
-	if record.Version == 0 {
-		record.Version = current.Version + 1
-	}
-	if record.Version <= current.Version {
-		return domain.Record{}, domain.ErrConflict
+	record.OwnerID = ownerID
+	record.UpdatedAt = s.clock.Now()
+
+	if err := validateRecord(record); err != nil {
+		return domain.Record{}, err
 	}
 
-	saved, err := s.records.Upsert(ctx, record)
-	if err != nil {
+	return s.createRecord(ctx, record)
+}
+
+// Update stores an existing record for the authenticated user.
+func (s *Service) Update(ctx context.Context, record domain.Record) (domain.Record, error) {
+	ownerID, ok := app.UserIDFromContext(ctx)
+	if !ok {
+		return domain.Record{}, domain.ErrUnauthorized
+	}
+
+	record.OwnerID = ownerID
+	record.UpdatedAt = s.clock.Now()
+
+	if err := validateRecord(record); err != nil {
 		return domain.Record{}, err
 	}
-	if err := s.appendChange(ctx, saved, domain.ChangeUpsert); err != nil {
-		return domain.Record{}, err
+
+	if record.ID == "" {
+		return domain.Record{}, errors.New("record id is required")
 	}
-	return saved, nil
+
+	return s.updateRecord(ctx, ownerID, record)
 }
 
 // Get fetches a record by id for the authenticated user.
@@ -132,7 +120,11 @@ func (s *Service) List(ctx context.Context, filter inbound.RecordFilter) ([]doma
 		IncludeDeleted: filter.IncludeDeleted,
 	}
 
-	return s.records.List(ctx, ownerID, outFilter)
+	iter, err := s.records.List(ctx, ownerID, outFilter)
+	if err != nil {
+		return nil, err
+	}
+	return outbound.Collect(ctx, iter)
 }
 
 // Delete removes a record for the authenticated user.
@@ -170,4 +162,59 @@ func (s *Service) appendChange(ctx context.Context, record domain.Record, change
 		Version:    record.Version,
 		HappenedAt: s.clock.Now(),
 	})
+}
+
+func validateRecord(record domain.Record) error {
+	if record.Type == "" {
+		return errors.New("record type is required")
+	}
+	if record.Payload == nil {
+		return errors.New("record payload is required")
+	}
+	return nil
+}
+
+func (s *Service) createRecord(ctx context.Context, record domain.Record) (domain.Record, error) {
+	record.ID = domain.RecordID(s.idGen.NewID())
+	if record.Version <= 0 {
+		record.Version = 1
+	}
+	return s.storeAndLog(ctx, record)
+}
+
+func (s *Service) updateRecord(ctx context.Context, ownerID domain.UserID, record domain.Record) (domain.Record, error) {
+	current, err := s.records.Get(ctx, record.ID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			if record.Version <= 0 {
+				record.Version = 1
+			}
+			return s.storeAndLog(ctx, record)
+		}
+		return domain.Record{}, err
+	}
+
+	if current.OwnerID != ownerID {
+		return domain.Record{}, domain.ErrUnauthorized
+	}
+
+	if record.Version == 0 {
+		record.Version = current.Version + 1
+	}
+	if record.Version <= current.Version {
+		return domain.Record{}, domain.ErrConflict
+	}
+
+	return s.storeAndLog(ctx, record)
+}
+
+func (s *Service) storeAndLog(ctx context.Context, record domain.Record) (domain.Record, error) {
+	saved, err := s.records.Upsert(ctx, record)
+	if err != nil {
+		return domain.Record{}, err
+	}
+	if err := s.appendChange(ctx, saved, domain.ChangeUpsert); err != nil {
+		return domain.Record{}, err
+	}
+	return saved, nil
 }

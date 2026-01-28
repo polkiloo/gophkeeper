@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestLoadDefaults(t *testing.T) {
@@ -96,25 +95,7 @@ func TestLoadInvalidYAML(t *testing.T) {
 	}
 }
 
-func TestParseDurationFallback(t *testing.T) {
-	if got := parseDuration("nope", 2*time.Hour); got != 2*time.Hour {
-		t.Fatalf("expected fallback")
-	}
-}
-
-func TestParseBoolInvalid(t *testing.T) {
-	if parseBool("not-bool") {
-		t.Fatalf("expected false")
-	}
-}
-
 func TestParseHelpers(t *testing.T) {
-	if got := parseDuration("30m", time.Hour); got != 30*time.Minute {
-		t.Fatalf("unexpected duration")
-	}
-	if !parseBool("true") {
-		t.Fatalf("expected true")
-	}
 	if ConfigPathFromEnv() != "" {
 		t.Fatalf("expected empty env path")
 	}

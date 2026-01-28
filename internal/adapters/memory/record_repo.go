@@ -57,13 +57,13 @@ func (r *RecordRepository) Get(_ context.Context, id domain.RecordID) (domain.Re
 }
 
 // List returns records for the given owner.
-func (r *RecordRepository) List(_ context.Context, ownerID domain.UserID, filter outbound.RecordFilter) ([]domain.Record, error) {
+func (r *RecordRepository) List(_ context.Context, ownerID domain.UserID, filter outbound.RecordFilter) (outbound.Iterator[domain.Record], error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	ids := r.byUser[ownerID]
 	if len(ids) == 0 {
-		return []domain.Record{}, nil
+		return outbound.NewSliceIterator([]domain.Record{}), nil
 	}
 
 	records := make([]domain.Record, 0, len(ids))
@@ -89,7 +89,7 @@ func (r *RecordRepository) List(_ context.Context, ownerID domain.UserID, filter
 		start = 0
 	}
 	if start >= len(records) {
-		return []domain.Record{}, nil
+		return outbound.NewSliceIterator([]domain.Record{}), nil
 	}
 
 	end := len(records)
@@ -97,7 +97,7 @@ func (r *RecordRepository) List(_ context.Context, ownerID domain.UserID, filter
 		end = start + filter.Limit
 	}
 
-	return records[start:end], nil
+	return outbound.NewSliceIterator(records[start:end]), nil
 }
 
 // Delete removes a record.

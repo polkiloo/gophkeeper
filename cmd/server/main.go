@@ -10,21 +10,8 @@ import (
 
 	"go.uber.org/fx"
 
-	"gophkeeper/internal/adapters/crypto"
-	"gophkeeper/internal/adapters/persistence"
-	"gophkeeper/internal/adapters/system"
-	"gophkeeper/internal/app/auth"
-	"gophkeeper/internal/app/auth/keycloak"
-	"gophkeeper/internal/app/authprovider"
-	"gophkeeper/internal/app/secrets"
-	"gophkeeper/internal/app/sync"
 	"gophkeeper/internal/buildinfo"
-	"gophkeeper/internal/config"
-	"gophkeeper/internal/logger"
-	"gophkeeper/internal/migrate"
-	"gophkeeper/internal/server"
-	"gophkeeper/internal/transport/httpapi"
-	"gophkeeper/internal/transport/secure"
+	"gophkeeper/internal/serverapp"
 )
 
 var (
@@ -41,20 +28,7 @@ func main() {
 
 	app := fx.New(
 		fx.Provide(func() context.Context { return ctx }),
-		logger.Module,
-		config.Module,
-		system.Module,
-		persistence.Module,
-		crypto.Module,
-		auth.Module,
-		keycloak.Module,
-		authprovider.Module,
-		secrets.Module,
-		sync.Module,
-		httpapi.Module,
-		secure.ServerModule,
-		migrate.Module,
-		server.Module,
+		serverapp.AppModule,
 	)
 
 	if err := run(ctx, app); err != nil {

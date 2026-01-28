@@ -32,9 +32,9 @@ func (m *mockRecordRepo) Get(ctx context.Context, id domain.RecordID) (domain.Re
 	return args.Get(0).(domain.Record), args.Error(1)
 }
 
-func (m *mockRecordRepo) List(ctx context.Context, ownerID domain.UserID, filter outbound.RecordFilter) ([]domain.Record, error) {
+func (m *mockRecordRepo) List(ctx context.Context, ownerID domain.UserID, filter outbound.RecordFilter) (outbound.Iterator[domain.Record], error) {
 	args := m.Called(ctx, ownerID, filter)
-	return args.Get(0).([]domain.Record), args.Error(1)
+	return args.Get(0).(outbound.Iterator[domain.Record]), args.Error(1)
 }
 
 func (m *mockRecordRepo) Delete(ctx context.Context, id domain.RecordID) error {
@@ -232,7 +232,8 @@ func TestServiceList(t *testing.T) {
 	records := new(mockRecordRepo)
 	filter := inbound.RecordFilter{Type: domain.RecordTypeText, Tag: "t", Query: "q", Limit: 1, Offset: 2, IncludeDeleted: true}
 
-	records.On("List", mock.Anything, domain.UserID("user-1"), outbound.RecordFilter{Type: filter.Type, Tag: filter.Tag, Query: filter.Query, Limit: 1, Offset: 2, IncludeDeleted: true}).Return([]domain.Record{}, nil)
+	records.On("List", mock.Anything, domain.UserID("user-1"), outbound.RecordFilter{Type: filter.Type, Tag: filter.Tag, Query: filter.Query, Limit: 1, Offset: 2, IncludeDeleted: true}).
+		Return(outbound.NewSliceIterator([]domain.Record{}), nil)
 
 	svc := NewService(records, new(mockChangeRepo), new(mockClock), new(mockIDGen))
 	ctx := app.WithUserID(context.Background(), "user-1")

@@ -370,7 +370,11 @@ func TestRecordRepository(t *testing.T) {
 	if _, err := repo.Get(context.Background(), "r1"); err != nil {
 		t.Fatalf("get error: %v", err)
 	}
-	list, err := repo.List(context.Background(), "u1", outbound.RecordFilter{Type: domain.RecordTypeText, Tag: "tag"})
+	iter, err := repo.List(context.Background(), "u1", outbound.RecordFilter{Type: domain.RecordTypeText, Tag: "tag"})
+	if err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	list, err := outbound.Collect(context.Background(), iter)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list error")
 	}
@@ -407,19 +411,35 @@ func TestRecordRepositoryFilters(t *testing.T) {
 		t.Fatalf("delete error: %v", err)
 	}
 
-	list, err := repo.List(context.Background(), "u2", outbound.RecordFilter{IncludeDeleted: true})
+	iter, err := repo.List(context.Background(), "u2", outbound.RecordFilter{IncludeDeleted: true})
+	if err != nil {
+		t.Fatalf("expected include deleted")
+	}
+	list, err := outbound.Collect(context.Background(), iter)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("expected include deleted")
 	}
-	list, err = repo.List(context.Background(), "u2", outbound.RecordFilter{Tag: "tag1"})
+	iter, err = repo.List(context.Background(), "u2", outbound.RecordFilter{Tag: "tag1"})
+	if err != nil {
+		t.Fatalf("expected filtered out deleted")
+	}
+	list, err = outbound.Collect(context.Background(), iter)
 	if err != nil || len(list) != 0 {
 		t.Fatalf("expected filtered out deleted")
 	}
-	list, err = repo.List(context.Background(), "u2", outbound.RecordFilter{Query: "title"})
+	iter, err = repo.List(context.Background(), "u2", outbound.RecordFilter{Query: "title"})
+	if err != nil {
+		t.Fatalf("expected filtered out deleted by query")
+	}
+	list, err = outbound.Collect(context.Background(), iter)
 	if err != nil || len(list) != 0 {
 		t.Fatalf("expected filtered out deleted by query")
 	}
-	list, err = repo.List(context.Background(), "u2", outbound.RecordFilter{IncludeDeleted: true, Limit: 1, Offset: 1})
+	iter, err = repo.List(context.Background(), "u2", outbound.RecordFilter{IncludeDeleted: true, Limit: 1, Offset: 1})
+	if err != nil {
+		t.Fatalf("expected offset slice")
+	}
+	list, err = outbound.Collect(context.Background(), iter)
 	if err != nil || len(list) != 0 {
 		t.Fatalf("expected offset slice")
 	}

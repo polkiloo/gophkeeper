@@ -35,6 +35,8 @@ func (a authStub) Validate(ctx context.Context, token string) (domain.Session, e
 
 type secretsStub struct {
 	upsert func(domain.Record) (domain.Record, error)
+	create func(domain.Record) (domain.Record, error)
+	update func(domain.Record) (domain.Record, error)
 	get    func(domain.RecordID) (domain.Record, error)
 	list   func(inbound.RecordFilter) ([]domain.Record, error)
 	delete func(domain.RecordID) error
@@ -42,6 +44,20 @@ type secretsStub struct {
 
 func (s secretsStub) Upsert(ctx context.Context, record domain.Record) (domain.Record, error) {
 	return s.upsert(record)
+}
+
+func (s secretsStub) Create(ctx context.Context, record domain.Record) (domain.Record, error) {
+	if s.create == nil {
+		return domain.Record{}, nil
+	}
+	return s.create(record)
+}
+
+func (s secretsStub) Update(ctx context.Context, record domain.Record) (domain.Record, error) {
+	if s.update == nil {
+		return domain.Record{}, nil
+	}
+	return s.update(record)
 }
 
 func (s secretsStub) Get(ctx context.Context, id domain.RecordID) (domain.Record, error) {

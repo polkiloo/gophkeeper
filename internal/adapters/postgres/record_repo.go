@@ -91,7 +91,7 @@ func (r *RecordRepository) Get(ctx context.Context, id domain.RecordID) (domain.
 }
 
 // List returns records for the given owner.
-func (r *RecordRepository) List(ctx context.Context, ownerID domain.UserID, filter outbound.RecordFilter) ([]domain.Record, error) {
+func (r *RecordRepository) List(ctx context.Context, ownerID domain.UserID, filter outbound.RecordFilter) (outbound.Iterator[domain.Record], error) {
 	query := `
 		SELECT id, owner_id, type, payload, meta, version, updated_at, deleted
 		FROM records
@@ -113,58 +113,8 @@ func (r *RecordRepository) List(ctx context.Context, ownerID domain.UserID, filt
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	records := make([]domain.Record, 0)
-	for rows.Next() {
-		var record domain.Record
-		var payload, meta []byte
-		var deleted bool
-		var version int64
-		var recordType string
-		if err := rows.Scan(&record.ID, &record.OwnerID, &recordType, &payload, &meta, &version, &record.UpdatedAt, &deleted); err != nil {
-			return nil, err
-		}
-		if deleted && !filter.IncludeDeleted {
-			continue
-		}
-		record.Type = domain.RecordType(recordType)
-		record.Version = domain.Version(version)
-		decodedPayload, err := decodePayload(record.Type, payload)
-		if err != nil {
-			return nil, err
-		}
-		record.Payload = decodedPayload
-		record.Meta, err = decodeMetadata(meta)
-		if err != nil {
-			return nil, err
-		}
-		if filter.Tag != "" && !hasTag(record.Meta.Tags, filter.Tag) {
-			continue
-		}
-		if filter.Query != "" && !matchesQuery(record, filter.Query) {
-			continue
-		}
-		records = append(records, record)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	start := filter.Offset
-	if start < 0 {
-		start = 0
-	}
-	if start >= len(records) {
-		return []domain.Record{}, nil
-	}
-
-	end := len(records)
-	if filter.Limit > 0 && start+filter.Limit < end {
-		end = start + filter.Limit
-	}
-
-	return records[start:end], nil
+	return &recordIterator{rows: rows, filter: filter}, nil
 }
 
 // Delete removes a record.
@@ -217,4 +167,80 @@ func matchesQuery(record domain.Record, query string) bool {
 		}
 	}
 	return false
+}
+
+type recordIterator struct {
+	rows    *sql.Rows
+	filter  outbound.RecordFilter
+	seen    int
+	emitted int
+	closed  bool
+}
+
+func (it *recordIterator) Next(ctx context.Context) (domain.Record, bool, error) {
+	var zero domain.Record
+	if err := ctx.Err(); err != nil {
+		_ = it.Close()
+		return zero, false, err
+	}
+
+	for it.rows.Next() {
+		var record domain.Record
+		var payload, meta []byte
+		var deleted bool
+		var version int64
+		var recordType string
+		if err := it.rows.Scan(&record.ID, &record.OwnerID, &recordType, &payload, &meta, &version, &record.UpdatedAt, &deleted); err != nil {
+			_ = it.Close()
+			return zero, false, err
+		}
+		if deleted && !it.filter.IncludeDeleted {
+			continue
+		}
+		record.Type = domain.RecordType(recordType)
+		record.Version = domain.Version(version)
+		decodedPayload, err := decodePayload(record.Type, payload)
+		if err != nil {
+			_ = it.Close()
+			return zero, false, err
+		}
+		record.Payload = decodedPayload
+		record.Meta, err = decodeMetadata(meta)
+		if err != nil {
+			_ = it.Close()
+			return zero, false, err
+		}
+		if it.filter.Tag != "" && !hasTag(record.Meta.Tags, it.filter.Tag) {
+			continue
+		}
+		if it.filter.Query != "" && !matchesQuery(record, it.filter.Query) {
+			continue
+		}
+		if it.seen < it.filter.Offset {
+			it.seen++
+			continue
+		}
+		if it.filter.Limit > 0 && it.emitted >= it.filter.Limit {
+			_ = it.Close()
+			return zero, false, nil
+		}
+		it.seen++
+		it.emitted++
+		return record, true, nil
+	}
+
+	if err := it.rows.Err(); err != nil {
+		_ = it.Close()
+		return zero, false, err
+	}
+	_ = it.Close()
+	return zero, false, nil
+}
+
+func (it *recordIterator) Close() error {
+	if it.closed {
+		return nil
+	}
+	it.closed = true
+	return it.rows.Close()
 }

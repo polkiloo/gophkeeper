@@ -33,17 +33,25 @@ func TestRecordRepositoryCRUD(t *testing.T) {
 		t.Fatalf("unexpected record")
 	}
 
-	list, err := repo.List(context.Background(), "u1", outbound.RecordFilter{Type: domain.RecordTypeText, Tag: "tag"})
+	iter, err := repo.List(context.Background(), "u1", outbound.RecordFilter{Type: domain.RecordTypeText, Tag: "tag"})
 	if err != nil {
 		t.Fatalf("list error: %v", err)
+	}
+	list, err := outbound.Collect(context.Background(), iter)
+	if err != nil {
+		t.Fatalf("collect error: %v", err)
 	}
 	if len(list) != 1 {
 		t.Fatalf("expected record list")
 	}
 
-	list, err = repo.List(context.Background(), "u1", outbound.RecordFilter{Query: "example"})
+	iter, err = repo.List(context.Background(), "u1", outbound.RecordFilter{Query: "example"})
 	if err != nil {
 		t.Fatalf("list query error: %v", err)
+	}
+	list, err = outbound.Collect(context.Background(), iter)
+	if err != nil {
+		t.Fatalf("collect error: %v", err)
 	}
 	if len(list) != 1 {
 		t.Fatalf("expected query match")
@@ -71,17 +79,25 @@ func TestRecordRepositoryIncludeDeleted(t *testing.T) {
 		t.Fatalf("delete error: %v", err)
 	}
 
-	list, err := repo.List(context.Background(), "u1", outbound.RecordFilter{})
+	iter, err := repo.List(context.Background(), "u1", outbound.RecordFilter{})
 	if err != nil {
 		t.Fatalf("list error: %v", err)
+	}
+	list, err := outbound.Collect(context.Background(), iter)
+	if err != nil {
+		t.Fatalf("collect error: %v", err)
 	}
 	if len(list) != 0 {
 		t.Fatalf("expected empty list without deleted")
 	}
 
-	list, err = repo.List(context.Background(), "u1", outbound.RecordFilter{IncludeDeleted: true})
+	iter, err = repo.List(context.Background(), "u1", outbound.RecordFilter{IncludeDeleted: true})
 	if err != nil {
 		t.Fatalf("list error: %v", err)
+	}
+	list, err = outbound.Collect(context.Background(), iter)
+	if err != nil {
+		t.Fatalf("collect error: %v", err)
 	}
 	if len(list) != 1 {
 		t.Fatalf("expected deleted record")

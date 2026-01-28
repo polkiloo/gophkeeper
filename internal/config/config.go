@@ -4,9 +4,9 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
+	"gophkeeper/internal/configutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -82,110 +82,48 @@ func Load(path ConfigPath) (Config, error) {
 
 func defaultConfig() Config {
 	return Config{
-		Addr:         getenv("GOPHKEEPER_ADDR", ":8080"),
-		TokenSecret:  getenv("GOPHKEEPER_TOKEN_SECRET", "dev-secret"),
-		TokenTTL:     parseDuration(getenv("GOPHKEEPER_TOKEN_TTL", "1h"), time.Hour),
-		AuthProvider: getenv("GOPHKEEPER_AUTH_PROVIDER", "local"),
+		Addr:         ":8080",
+		TokenSecret:  "dev-secret",
+		TokenTTL:     time.Hour,
+		AuthProvider: "local",
 		Keycloak: KeycloakConfig{
-			BaseURL:           getenv("KEYCLOAK_BASE_URL", "http://localhost:8081"),
-			Realm:             getenv("KEYCLOAK_REALM", "gophkeeper"),
-			ClientID:          getenv("KEYCLOAK_CLIENT_ID", "gophkeeper-cli"),
-			ClientSecret:      getenv("KEYCLOAK_CLIENT_SECRET", ""),
-			AdminUser:         getenv("KEYCLOAK_ADMIN_USER", "admin"),
-			AdminPassword:     getenv("KEYCLOAK_ADMIN_PASSWORD", "admin"),
-			AdminClientID:     getenv("KEYCLOAK_ADMIN_CLIENT_ID", "admin-cli"),
-			AdminClientSecret: getenv("KEYCLOAK_ADMIN_CLIENT_SECRET", ""),
+			BaseURL:           "http://localhost:8081",
+			Realm:             "gophkeeper",
+			ClientID:          "gophkeeper-cli",
+			ClientSecret:      "",
+			AdminUser:         "admin",
+			AdminPassword:     "admin",
+			AdminClientID:     "admin-cli",
+			AdminClientSecret: "",
 		},
-		StorageBackend: getenv("GOPHKEEPER_STORAGE", "memory"),
-		PostgresDSN:    getenv("GOPHKEEPER_PG_DSN", ""),
-		TransportKey:   getenv("GOPHKEEPER_TRANSPORT_KEY", ""),
-		TLSEnabled:     parseBool(getenv("GOPHKEEPER_TLS_ENABLE", "")),
-		TLSCertFile:    getenv("GOPHKEEPER_TLS_CERT", ""),
-		TLSKeyFile:     getenv("GOPHKEEPER_TLS_KEY", ""),
-		TLSCAFile:      getenv("GOPHKEEPER_TLS_CA", ""),
+		StorageBackend: "memory",
+		PostgresDSN:    "",
+		TransportKey:   "",
+		TLSEnabled:     false,
+		TLSCertFile:    "",
+		TLSKeyFile:     "",
+		TLSCAFile:      "",
 	}
-}
-
-func getenv(key, fallback string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
-func parseDuration(value string, fallback time.Duration) time.Duration {
-	parsed, err := time.ParseDuration(value)
-	if err != nil {
-		return fallback
-	}
-	return parsed
-}
-
-func parseBool(value string) bool {
-	parsed, err := strconv.ParseBool(value)
-	if err != nil {
-		return false
-	}
-	return parsed
 }
 
 func applyEnvOverrides(cfg *Config) {
-	if value := os.Getenv("GOPHKEEPER_ADDR"); value != "" {
-		cfg.Addr = value
-	}
-	if value := os.Getenv("GOPHKEEPER_TOKEN_SECRET"); value != "" {
-		cfg.TokenSecret = value
-	}
-	if value := os.Getenv("GOPHKEEPER_TOKEN_TTL"); value != "" {
-		cfg.TokenTTL = parseDuration(value, cfg.TokenTTL)
-	}
-	if value := os.Getenv("GOPHKEEPER_AUTH_PROVIDER"); value != "" {
-		cfg.AuthProvider = value
-	}
-	if value := os.Getenv("KEYCLOAK_BASE_URL"); value != "" {
-		cfg.Keycloak.BaseURL = value
-	}
-	if value := os.Getenv("KEYCLOAK_REALM"); value != "" {
-		cfg.Keycloak.Realm = value
-	}
-	if value := os.Getenv("KEYCLOAK_CLIENT_ID"); value != "" {
-		cfg.Keycloak.ClientID = value
-	}
-	if value := os.Getenv("KEYCLOAK_CLIENT_SECRET"); value != "" {
-		cfg.Keycloak.ClientSecret = value
-	}
-	if value := os.Getenv("KEYCLOAK_ADMIN_USER"); value != "" {
-		cfg.Keycloak.AdminUser = value
-	}
-	if value := os.Getenv("KEYCLOAK_ADMIN_PASSWORD"); value != "" {
-		cfg.Keycloak.AdminPassword = value
-	}
-	if value := os.Getenv("KEYCLOAK_ADMIN_CLIENT_ID"); value != "" {
-		cfg.Keycloak.AdminClientID = value
-	}
-	if value := os.Getenv("KEYCLOAK_ADMIN_CLIENT_SECRET"); value != "" {
-		cfg.Keycloak.AdminClientSecret = value
-	}
-	if value := os.Getenv("GOPHKEEPER_STORAGE"); value != "" {
-		cfg.StorageBackend = value
-	}
-	if value := os.Getenv("GOPHKEEPER_PG_DSN"); value != "" {
-		cfg.PostgresDSN = value
-	}
-	if value := os.Getenv("GOPHKEEPER_TRANSPORT_KEY"); value != "" {
-		cfg.TransportKey = value
-	}
-	if value := os.Getenv("GOPHKEEPER_TLS_ENABLE"); value != "" {
-		cfg.TLSEnabled = parseBool(value)
-	}
-	if value := os.Getenv("GOPHKEEPER_TLS_CERT"); value != "" {
-		cfg.TLSCertFile = value
-	}
-	if value := os.Getenv("GOPHKEEPER_TLS_KEY"); value != "" {
-		cfg.TLSKeyFile = value
-	}
-	if value := os.Getenv("GOPHKEEPER_TLS_CA"); value != "" {
-		cfg.TLSCAFile = value
-	}
+	configutil.OverrideEnv(&cfg.Addr, "GOPHKEEPER_ADDR", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.TokenSecret, "GOPHKEEPER_TOKEN_SECRET", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.TokenTTL, "GOPHKEEPER_TOKEN_TTL", configutil.ParseDuration)
+	configutil.OverrideEnv(&cfg.AuthProvider, "GOPHKEEPER_AUTH_PROVIDER", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.Keycloak.BaseURL, "KEYCLOAK_BASE_URL", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.Keycloak.Realm, "KEYCLOAK_REALM", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.Keycloak.ClientID, "KEYCLOAK_CLIENT_ID", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.Keycloak.ClientSecret, "KEYCLOAK_CLIENT_SECRET", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.Keycloak.AdminUser, "KEYCLOAK_ADMIN_USER", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.Keycloak.AdminPassword, "KEYCLOAK_ADMIN_PASSWORD", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.Keycloak.AdminClientID, "KEYCLOAK_ADMIN_CLIENT_ID", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.Keycloak.AdminClientSecret, "KEYCLOAK_ADMIN_CLIENT_SECRET", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.StorageBackend, "GOPHKEEPER_STORAGE", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.PostgresDSN, "GOPHKEEPER_PG_DSN", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.TransportKey, "GOPHKEEPER_TRANSPORT_KEY", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.TLSEnabled, "GOPHKEEPER_TLS_ENABLE", configutil.ParseBool)
+	configutil.OverrideEnv(&cfg.TLSCertFile, "GOPHKEEPER_TLS_CERT", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.TLSKeyFile, "GOPHKEEPER_TLS_KEY", configutil.ParseString)
+	configutil.OverrideEnv(&cfg.TLSCAFile, "GOPHKEEPER_TLS_CA", configutil.ParseString)
 }

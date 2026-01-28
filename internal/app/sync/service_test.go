@@ -29,9 +29,9 @@ func (m *mockRecordRepo) Get(ctx context.Context, id domain.RecordID) (domain.Re
 	return args.Get(0).(domain.Record), args.Error(1)
 }
 
-func (m *mockRecordRepo) List(ctx context.Context, ownerID domain.UserID, filter outbound.RecordFilter) ([]domain.Record, error) {
+func (m *mockRecordRepo) List(ctx context.Context, ownerID domain.UserID, filter outbound.RecordFilter) (outbound.Iterator[domain.Record], error) {
 	args := m.Called(ctx, ownerID, filter)
-	return args.Get(0).([]domain.Record), args.Error(1)
+	return args.Get(0).(outbound.Iterator[domain.Record]), args.Error(1)
 }
 
 func (m *mockRecordRepo) Delete(ctx context.Context, id domain.RecordID) error {

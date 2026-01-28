@@ -34,6 +34,14 @@ func (stubSecrets) Upsert(ctx context.Context, record domain.Record) (domain.Rec
 	return domain.Record{}, nil
 }
 
+func (stubSecrets) Create(ctx context.Context, record domain.Record) (domain.Record, error) {
+	return domain.Record{}, nil
+}
+
+func (stubSecrets) Update(ctx context.Context, record domain.Record) (domain.Record, error) {
+	return domain.Record{}, nil
+}
+
 func (stubSecrets) Get(ctx context.Context, id domain.RecordID) (domain.Record, error) {
 	return domain.Record{}, nil
 }
